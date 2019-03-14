@@ -1,32 +1,42 @@
+#[macro_use]
+extern crate log;
+
 mod db;
 mod tp;
 
 use db::{Command, Database};
+use env_logger;
 use tp::ThreadPool;
 
 use std::{
     io::prelude::*,
     io::BufReader,
     net::{TcpListener, TcpStream},
+    sync::{Arc, Mutex},
 };
 
 fn main() {
-    let listener = TcpListener::bind("127.0.0.1:7878").unwrap();
+    env_logger::init();
+    debug!("Starting up...");
 
-    // Store data
-    let storage = Database::new();
+    let pool = ThreadPool::new(24);
 
-    // Creates a threadpool with 4 connection workers
-    let mut pool = ThreadPool::new(4);
+    let addr = "127.0.0.1:7878";
+    let listener = TcpListener::bind(addr).unwrap();
+    info!("Listening in {}", addr);
 
-    // This is an infinite iterator
+    let storage = Arc::new(Mutex::new(Database::new()));
+
     for stream in listener.incoming() {
+        let storage = storage.clone();
+
         pool.queue(move || {
             let mut stream = stream.unwrap();
 
             loop {
                 let mut read_buffer = String::new();
                 let mut buffered_stream = BufReader::new(&stream);
+
                 if let Err(_) = buffered_stream.read_line(&mut read_buffer) {
                     break;
                 }
@@ -36,10 +46,14 @@ fn main() {
                 match cmd {
                     Ok(Command::Get) => send_reply(
                         &mut stream,
-                        storage.get().unwrap_or_else(|| "<empty>".into()),
+                        storage
+                            .lock()
+                            .unwrap()
+                            .get()
+                            .unwrap_or_else(|| "<empty>".into()),
                     ),
                     Ok(Command::Pub(s)) => {
-                        storage.store(s);
+                        storage.lock().unwrap().store(s);
                         send_reply(&mut stream, "<done>");
                     }
                     Err(e) => send_reply(&mut stream, format!("<error: {:?}>", e)),
@@ -47,6 +61,9 @@ fn main() {
             }
         });
     }
+
+    // This will not work
+    pool.shutdown();
 }
 
 // No need to really touch this function

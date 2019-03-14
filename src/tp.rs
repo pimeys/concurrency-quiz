@@ -25,6 +25,8 @@ impl ThreadPool {
                 let stealer = job_queue.stealer();
                 let running = running.clone();
 
+                info!("Start worker {}", id);
+
                 spawn(move || {
                     let worker = Worker::new(id, stealer, running);
                     worker.do_work();
@@ -43,6 +45,7 @@ impl ThreadPool {
     where
         F: FnOnce() + Send + 'static,
     {
+        debug!("Queuing work...");
         self.job_queue.push(Box::new(f));
     }
 
@@ -54,7 +57,7 @@ impl ThreadPool {
         }
 
         for wrkr in self.workers.into_iter() {
-            wrkr.join();
+            wrkr.join().unwrap();
         }
     }
 }
@@ -89,12 +92,13 @@ impl Worker {
     fn do_work(&self) {
         while self.running.load(Ordering::Relaxed) {
             while let Steal::Success(job) = self.stealer.steal() {
+                debug!("Worker {} got work", self.id);
                 job.call_box();
             }
 
             park_timeout(Duration::from_millis(100));
         }
 
-        println!("Exit worker {}", self.id);
+        info!("Exit worker {}", self.id);
     }
 }

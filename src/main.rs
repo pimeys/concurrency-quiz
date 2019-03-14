@@ -6,13 +6,14 @@ mod tp;
 
 use db::{Command, Database};
 use env_logger;
+use parking_lot::Mutex;
 use tp::ThreadPool;
 
 use std::{
     io::prelude::*,
     io::BufReader,
     net::{TcpListener, TcpStream},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 fn main() {
@@ -46,15 +47,15 @@ fn main() {
                 match cmd {
                     Ok(Command::Get) => send_reply(
                         &mut stream,
-                        storage
-                            .lock()
-                            .unwrap()
-                            .get()
-                            .unwrap_or_else(|| "<empty>".into()),
+                        storage.lock().get().unwrap_or_else(|| "<empty>".into()),
                     ),
                     Ok(Command::Pub(s)) => {
-                        storage.lock().unwrap().store(s);
+                        storage.lock().store(s);
                         send_reply(&mut stream, "<done>");
+                    }
+                    Ok(Command::Quit) => {
+                        send_reply(&mut stream, "<bye>");
+                        return;
                     }
                     Err(e) => send_reply(&mut stream, format!("<error: {:?}>", e)),
                 }
@@ -62,7 +63,6 @@ fn main() {
         });
     }
 
-    // This will not work
     pool.shutdown();
 }
 

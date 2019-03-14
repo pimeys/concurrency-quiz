@@ -1,10 +1,6 @@
 use crossbeam_deque::{Steal, Stealer, Worker as Queue};
 
 use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
     thread::{park_timeout, spawn, JoinHandle},
     time::Duration,
 };
@@ -12,33 +8,26 @@ use std::{
 pub struct ThreadPool {
     workers: Vec<JoinHandle<()>>,
     job_queue: Queue<Job>,
-    running: Arc<AtomicBool>,
 }
 
 impl ThreadPool {
     pub fn new(size: usize) -> Self {
         let job_queue = Queue::<Job>::new_fifo();
-        let running = Arc::new(AtomicBool::new(true));
 
         let workers = (0..size)
             .map(|id| {
                 let stealer = job_queue.stealer();
-                let running = running.clone();
 
                 info!("Start worker {}", id);
 
                 spawn(move || {
-                    let worker = Worker::new(id, stealer, running);
+                    let worker = Worker::new(id, stealer);
                     worker.do_work();
                 })
             })
             .collect();
 
-        Self {
-            workers,
-            job_queue,
-            running,
-        }
+        Self { workers, job_queue }
     }
 
     pub fn queue<F>(&self, f: F)
@@ -50,8 +39,6 @@ impl ThreadPool {
     }
 
     pub fn shutdown(self) {
-        self.running.store(false, Ordering::Relaxed);
-
         for wrkr in self.workers.iter() {
             wrkr.thread().unpark();
         }
@@ -77,28 +64,22 @@ type Job = Box<FnBox + Send + 'static>;
 struct Worker {
     id: usize,
     stealer: Stealer<Job>,
-    running: Arc<AtomicBool>,
 }
 
 impl Worker {
-    fn new(id: usize, stealer: Stealer<Job>, running: Arc<AtomicBool>) -> Self {
-        Self {
-            id,
-            stealer,
-            running,
-        }
+    fn new(id: usize, stealer: Stealer<Job>) -> Self {
+        Self { id, stealer }
     }
 
     fn do_work(&self) {
-        while self.running.load(Ordering::Relaxed) {
+        loop {
             while let Steal::Success(job) = self.stealer.steal() {
-                debug!("Worker {} got work", self.id);
+                debug!("Opening a connection in worker {}", self.id);
                 job.call_box();
+                debug!("Closing a connection in worker {}", self.id);
             }
 
             park_timeout(Duration::from_millis(100));
         }
-
-        info!("Exit worker {}", self.id);
     }
 }

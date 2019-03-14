@@ -12,6 +12,7 @@ pub struct Database {
 pub enum Command {
     Pub(String),
     Get,
+    Quit,
 }
 
 #[derive(Eq, PartialEq, Debug)]
@@ -36,6 +37,13 @@ pub fn parse(input: &str) -> Result<Command, Error> {
             "PUB" => {
                 if let Some(payload) = split.next() {
                     Ok(Command::Pub(payload.trim().into()))
+                } else {
+                    Err(Error::BadPayload)
+                }
+            }
+            "QUIT" => {
+                if split.next() == None {
+                    Ok(Command::Quit)
                 } else {
                     Err(Error::BadPayload)
                 }
